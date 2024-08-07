@@ -3,7 +3,7 @@ use crate::{
     CsrLayout, DirectedDegrees, DirectedNeighbors, DirectedNeighborsWithValues, Graph, Target,
     UndirectedDegrees, UndirectedNeighbors, UndirectedNeighborsWithValues,
 };
-use crate::{EdgeMutation, EdgeMutationWithValues};
+use crate::{EdgeAlterationWithValues, EdgeMutation, EdgeMutationWithValues};
 
 use log::info;
 use std::sync::{RwLock, RwLockReadGuard};
@@ -68,6 +68,17 @@ impl<NI: Idx, EV> AdjacencyList<NI, EV> {
     }
 
     #[inline]
+    pub(crate) fn alter_edge_value(
+        &self,
+        source: NI,
+        target_prev: Target<NI, EV>,
+        target_new: Target<NI, EV>,
+    ) {
+        let mut edges = self.edges[source.index()].write().unwrap();
+        Self::apply_alter(self.layout, &mut edges, target_prev, target_new);
+    }
+
+    #[inline]
     fn check_bounds(&self, node: NI) -> Result<(), crate::Error> {
         if node >= self.node_count() {
             return Err(crate::Error::MissingNode {
@@ -89,6 +100,30 @@ impl<NI: Idx, EV> AdjacencyList<NI, EV> {
                 Ok(_) => {}
                 Err(i) => edges.insert(i, target),
             },
+        };
+    }
+
+    #[inline]
+    fn apply_alter(
+        layout: CsrLayout,
+        edges: &mut Vec<Target<NI, EV>>,
+        target_prev: Target<NI, EV>,
+        target_new: Target<NI, EV>,
+    ) {
+        match layout {
+            CsrLayout::Sorted | CsrLayout::Deduplicated => {
+                match edges.binary_search(&target_prev) {
+                    Ok(i) => edges[i] = target_new,
+                    Err(i) => edges.insert(i, target_new),
+                }
+            }
+            CsrLayout::Unsorted => edges
+                .iter_mut()
+                .find(|edge| **edge == target_prev)
+                .map(|edge| {
+                    *edge = target_new;
+                })
+                .unwrap(),
         };
     }
 }
@@ -207,9 +242,8 @@ impl<'slice, NI: Idx, EV> Iterator for TargetsWithValuesIter<'slice, NI, EV> {
 impl<NI: Idx, EV> AdjacencyList<NI, EV> {
     #[inline]
     pub(crate) fn targets_with_values(&self, node: NI) -> TargetsWithValues<'_, NI, EV> {
-        TargetsWithValues {
-            targets: self.edges[node.index()].read().unwrap(),
-        }
+        let targets = self.edges[node.index()].read().unwrap();
+        TargetsWithValues { targets }
     }
 }
 
@@ -537,6 +571,31 @@ impl<NI: Idx, NV, EV: Copy> EdgeMutationWithValues<NI, EV> for UndirectedALGraph
         self.al.check_bounds(target)?;
         self.al.insert_mut(source, Target::new(target, value));
         self.al.insert_mut(target, Target::new(source, value));
+
+        Ok(())
+    }
+}
+
+impl<NI: Idx, NV, EV: Copy> EdgeAlterationWithValues<NI, EV> for UndirectedALGraph<NI, NV, EV> {
+    fn alter_edge_with_value(
+        &self,
+        source: NI,
+        target: NI,
+        value_prev: EV,
+        value_new: EV,
+    ) -> Result<(), crate::Error> {
+        self.al.check_bounds(source)?;
+        self.al.check_bounds(target)?;
+        self.al.alter_edge_value(
+            source,
+            Target::new(target, value_prev),
+            Target::new(target, value_new),
+        );
+        self.al.alter_edge_value(
+            target,
+            Target::new(source, value_prev),
+            Target::new(source, value_new),
+        );
 
         Ok(())
     }
@@ -976,6 +1035,54 @@ mod test {
                 Target::new(1, 19.84),
                 Target::new(2, 1.23)
             ]
+        );
+    }
+
+    #[test]
+    fn undirected_al_graph_w_unsorted_alter_edge_with_value() {
+        let g = GraphBuilder::new()
+            .csr_layout(CsrLayout::Unsorted)
+            .edges_with_values([(0, 2, "some"), (1, 2, "other")])
+            .build::<UndirectedALGraph<u32, (), &str>>();
+
+        g.alter_edge_with_value(0, 2, "some", "another_some")
+            .expect("must work");
+
+        assert_eq!(
+            g.neighbors_with_values(0).as_slice(),
+            &[Target::new(2, "another_some")]
+        );
+        assert_eq!(
+            g.neighbors_with_values(1).as_slice(),
+            &[Target::new(2, "other")]
+        );
+        assert_eq!(
+            g.neighbors_with_values(2).as_slice(),
+            &[Target::new(1, "other"), Target::new(0, "another_some"),]
+        );
+    }
+
+    #[test]
+    fn undirected_al_graph_w_sorted_alter_edge_with_value() {
+        let g = GraphBuilder::new()
+            .csr_layout(CsrLayout::Sorted)
+            .edges_with_values([(0, 2, "some"), (1, 2, "other")])
+            .build::<UndirectedALGraph<u32, (), &str>>();
+
+        g.alter_edge_with_value(0, 2, "some", "another_some")
+            .expect("must work");
+
+        assert_eq!(
+            g.neighbors_with_values(0).as_slice(),
+            &[Target::new(2, "another_some")]
+        );
+        assert_eq!(
+            g.neighbors_with_values(1).as_slice(),
+            &[Target::new(2, "other")]
+        );
+        assert_eq!(
+            g.neighbors_with_values(2).as_slice(),
+            &[Target::new(0, "another_some"), Target::new(1, "other")]
         );
     }
 

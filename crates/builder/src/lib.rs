@@ -356,6 +356,17 @@ pub trait UndirectedNeighborsWithValues<NI: Idx, EV> {
     fn neighbors_with_values(&self, node: NI) -> Self::NeighborsIterator<'_>;
 }
 
+pub trait UndirectedNeighborsWithValuesMut<NI: Idx, EV> {
+    type NeighborsMutIterator<'a>: Iterator<Item = &'a mut Target<NI, EV>>
+    where
+        Self: 'a,
+        EV: 'a;
+
+    /// Returns an iterator of all nodes connected to the given node
+    /// including the value of the connecting edge.
+    fn neighbors_with_values_mut(&mut self, node: NI) -> Self::NeighborsMutIterator<'_>;
+}
+
 pub trait DirectedDegrees<NI: Idx> {
     /// Returns the number of edges where the given node is a source node.
     fn out_degree(&self, node: NI) -> NI;
@@ -453,6 +464,16 @@ pub trait EdgeMutationWithValues<NI: Idx, EV> {
     /// If either the source or the target node does not exist,
     /// the method will return [`Error::MissingNode`].
     fn add_edge_with_value_mut(&mut self, source: NI, target: NI, value: EV) -> Result<(), Error>;
+}
+
+pub trait EdgeAlterationWithValues<NI: Idx, EV> {
+    fn alter_edge_with_value(
+        &self,
+        source: NI,
+        target: NI,
+        value_prev: EV,
+        value_new: EV,
+    ) -> Result<(), crate::Error>;
 }
 
 #[repr(transparent)]

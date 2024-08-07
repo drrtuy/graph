@@ -21,7 +21,7 @@ use crate::{
     input::{edgelist::Edges, Direction},
     DirectedDegrees, DirectedNeighbors, DirectedNeighborsWithValues, Error, Graph,
     NodeValues as NodeValuesTrait, SharedMut, Target, UndirectedDegrees, UndirectedNeighbors,
-    UndirectedNeighborsWithValues,
+    UndirectedNeighborsWithValues, UndirectedNeighborsWithValuesMut,
 };
 
 #[cfg(feature = "dotgraph")]
@@ -89,6 +89,14 @@ impl<Index: Idx, NI, EV> Csr<Index, NI, EV> {
         let to = self.offsets[(i + Index::new(1)).index()];
 
         &self.targets[from.index()..to.index()]
+    }
+
+    #[inline]
+    pub(crate) fn targets_with_values_mut(&mut self, i: Index) -> &mut [Target<NI, EV>] {
+        let from = self.offsets[i.index()];
+        let to = self.offsets[(i + Index::new(1)).index()];
+
+        &mut self.targets[from.index()..to.index()]
     }
 }
 
@@ -709,6 +717,13 @@ impl<NI: Idx, NV, EV> UndirectedNeighborsWithValues<NI, EV> for UndirectedCsrGra
     }
 }
 
+impl<NI: Idx, NV, EV> UndirectedNeighborsWithValuesMut<NI, EV> for UndirectedCsrGraph<NI, NV, EV> {
+    type NeighborsMutIterator<'a> = std::slice::IterMut<'a, Target<NI, EV>> where NV: 'a, EV: 'a;
+    fn neighbors_with_values_mut(&mut self, node: NI) -> Self::NeighborsMutIterator<'_> {
+        self.csr.targets_with_values_mut(node).iter_mut()
+    }
+}
+
 impl<NI: Idx, NV, EV> SwapCsr<NI, NI, EV> for UndirectedCsrGraph<NI, NV, EV> {
     fn swap_csr(&mut self, mut csr: Csr<NI, NI, EV>) -> &mut Self {
         std::mem::swap(&mut self.csr, &mut csr);
@@ -745,14 +760,14 @@ where
     fn from((node_values, edge_list, csr_option): (NodeValues<NV>, E, CsrLayout)) -> Self {
         info!("Creating undirected graph");
         let node_count = NI::new(node_values.0.len());
-        let node_count_from_edge_list = edge_list.max_node_id() + NI::new(1);
+        // let node_count_from_edge_list = edge_list.max_node_id() + NI::new(1);
 
-        assert!(
-            node_count >= node_count_from_edge_list,
-            "number of node values ({}) does not match node count of edge list ({})",
-            node_count.index(),
-            node_count_from_edge_list.index()
-        );
+        // assert!(
+        //     node_count >= node_count_from_edge_list,
+        //     "number of node values ({}) does not match node count of edge list ({})",
+        //     node_count.index(),
+        //     node_count_from_edge_list.index()
+        // );
 
         let start = Instant::now();
         let csr = Csr::from((&edge_list, node_count, Direction::Undirected, csr_option));
